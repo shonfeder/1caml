@@ -2,7 +2,7 @@
 
 (executables
  ((names (main))
-  (libraries (OneCaml))))
+  (libraries (cmdliner lwt.unix OneCaml))))
 
 (install
  ((section bin)
