@@ -1,28 +1,28 @@
 // sugared
 sig OPT = {
-  type opt a
-  val none a : opt a
-  val some a : a -> opt a
-  val case a b : opt a -> b -> (a -> b) -> b
+  type T a
+  val none a : T a
+  val some a : a -> T a
+  val case a b : T a -> b -> (a -> b) -> b
 }
 // unsugared
-def OPT = sig {
-  val opt : (a : type) => type
-  val none : (a : type) => opt a
-  val some : (a : type) => a -> opt a
-  val case : (a : type) => (b : type) -> opt a -> b -> (a -> b) -> b
+sig OPT = sig {
+  val T : (a : type) => type
+  val none : (a : type) => T a
+  val some : (a : type) => a -> T a
+  val case : (a : type) => (b : type) -> T a -> b -> (a -> b) -> b
 }
 
 // sugared
 mod Opt :> OPT = {
-  type opt a = into (b : type) => b -> (a -> b) -> b
-  def none a = into fun (b : type) (n : b) (s : a -> b) => n
-  def some a x = into fun (b : type) (n : b) (s : a -> b) => s x
-  def case a b o = (from o) b
+  type Opt a = into (b : type) => b -> (a -> b) -> b
+  def none 'a = into fun (b : type) (n : b) (s : a -> b) => n
+  def some 'a x = into fun (b : type) (n : b) (s : a -> b) => s x
+  def case 'a b o = (from o) b
 }
 // unsugared
-def Opt :> OPT = mod {
-  def opt = fun (a : type) => into (b : type) => b -> (a -> b) -> b
+mod Opt :> OPT = mod {
+  def Opt = fun (a : type) => into (b : type) => b -> (a -> b) -> b
   def none = fun (a : type) => into fun (b : type) (n : b) (s : a -> b) => n
   def some = fun (a : type) => fun (x : a) => into fun (b : type) (n : b) (s : a -> b) => s x
   def case = fun (a : type) => fun (b : type) => fun (o : t a) => (from o) b
@@ -30,49 +30,48 @@ def Opt :> OPT = mod {
 
 // sugared
 sig EQ = {
-  type t
-  val eq : t -> t -> bool
+  type T
+  val eq : T -> T -> bool
 }
 // unsugared
-def EQ = sig {
-  val t : type
-  val eq : t -> t -> bool
+sig EQ = sig {
+  val T : type
+  val eq : T -> T -> bool
 }
 
 // sugared
 sig MAP = {
-  open Opt
-  type key
-  type map a
-  val empty a : map a
-  val lookup a : key -> map a -> opt a
-  val add a : key -> a -> map a -> map a
+  type Key
+  type Map a
+  val empty a : Map a
+  val lookup a : Key -> Map a -> Opt a  // Opt treated as Opt.T automatically?
+  val add a : Key -> a -> Map a -> Map a
 }
 // unsugared
-def MAP = sig {
-  val K : type
-  val map : (a : type) => type
-  val empty : (a : type) => map a
-  val lookup : (a : type) => key -> map a -> opt a
-  val add : (a : type) => key -> a -> map a -> map a
+sig MAP = sig {
+  val Key : type
+  val Map : (a : type) => type
+  val empty : (a : type) => Map a
+  val lookup : (a : type) => Key -> Map a -> Opt a
+  val add : (a : type) => Key -> a -> Map a -> Map a
 }
 
-mod Map (Key : EQ) :> MAP with (type key = Key.t) = {
+mod Map (K : EQ) :> MAP with (type Key = K.T) = {
   open Opt
-  type key = Key.t
-  type map a = key -> opt a;
+  type Key = K.T
+  type Map a = Key -> Opt a
   def empty = fun x => none
   def lookup x m = m x
   def add x y m = fun z => if Key.eq z x then some y else m z
 }
 
 sig COLLECTION c = {
-  type key
-  type val
+  type Key
+  type Val
   val empty : c
-  val add : c -> key -> val -> c
-  val lookup : c -> key -> opt val
-  val keys : c -> list key
+  val add : c -> Key -> Val -> c
+  val lookup : c -> Key -> Opt Val
+  val keys : c -> List Key
 }
 
 sig MONAD (m : type => type) = {
@@ -80,7 +79,7 @@ sig MONAD (m : type => type) = {
   val (>>=) a b : m a -> (a -> m b) -> m b
 }
 
-def map a b (m : type => type) (M : Monad m) (f : a -> b) (v : m a) : m b = {
-  let open M;
+def map 'a 'b (m : type => type) (M : Monad m) (f : a -> b) (v : m a) : m b = {
+  open M;
   v >>= fun x => M.pure $ f x
 }
