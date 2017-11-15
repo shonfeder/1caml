@@ -1,0 +1,86 @@
+// sugared
+sig OPT = {
+  type opt a
+  val none a : opt a
+  val some a : a -> opt a
+  val case a b : opt a -> b -> (a -> b) -> b
+}
+// unsugared
+def OPT = sig {
+  val opt : (a : type) => type
+  val none : (a : type) => opt a
+  val some : (a : type) => a -> opt a
+  val case : (a : type) => (b : type) -> opt a -> b -> (a -> b) -> b
+}
+
+// sugared
+mod Opt :> OPT = {
+  type opt a = into (b : type) => b -> (a -> b) -> b
+  def none a = into fun (b : type) (n : b) (s : a -> b) => n
+  def some a x = into fun (b : type) (n : b) (s : a -> b) => s x
+  def case a b o = (from o) b
+}
+// unsugared
+def Opt :> OPT = mod {
+  def opt = fun (a : type) => into (b : type) => b -> (a -> b) -> b
+  def none = fun (a : type) => into fun (b : type) (n : b) (s : a -> b) => n
+  def some = fun (a : type) => fun (x : a) => into fun (b : type) (n : b) (s : a -> b) => s x
+  def case = fun (a : type) => fun (b : type) => fun (o : t a) => (from o) b
+}
+
+// sugared
+sig EQ = {
+  type t
+  val eq : t -> t -> bool
+}
+// unsugared
+def EQ = sig {
+  val t : type
+  val eq : t -> t -> bool
+}
+
+// sugared
+sig MAP = {
+  open Opt
+  type key
+  type map a
+  val empty a : map a
+  val lookup a : key -> map a -> opt a
+  val add a : key -> a -> map a -> map a
+}
+// unsugared
+def MAP = sig {
+  val K : type
+  val map : (a : type) => type
+  val empty : (a : type) => map a
+  val lookup : (a : type) => key -> map a -> opt a
+  val add : (a : type) => key -> a -> map a -> map a
+}
+
+mod Map (Key : EQ) :> MAP with (type key = Key.t) = {
+  open Opt
+  type key = Key.t
+  type map a = key -> opt a;
+  def empty = fun x => none
+  def lookup x m = m x
+  def add x y m = fun z => if Key.eq z x then some y else m z
+}
+
+sig COLLECTION c = {
+  type key
+  type val
+  val empty : c
+  val add : c -> key -> val -> c
+  val lookup : c -> key -> opt val
+  val keys : c -> list key
+}
+
+sig MONAD (m : type => type) = {
+  val pure a : a -> m a
+  val (>>=) a b : m a -> (a -> m b) -> m b
+}
+
+def map a b (m : type => type) (M : Monad m) (f : a -> b) (v : m a) : m b = {
+  let open M;
+  v >>= fun x => M.pure $ f x
+}
