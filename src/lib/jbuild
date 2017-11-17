@@ -2,4 +2,8 @@
 
 (library
  ((name OneCaml)
-  (public_name 1caml)))
+  (public_name 1caml)
+  (libraries (fmt uuseg lwt.unix))
+  (preprocess (pps (lwt.ppx)))))
+
+(ocamllex (Lexer))
