@@ -1,6 +1,6 @@
 # 1Caml
 
-1Caml is an implementation of 1ML targeting the OCaml runtime
+1Caml is an implementation of [1ML](https://people.mpi-sws.org/~rossberg/1ml/) targeting the OCaml runtime
 
 ## Status
 
