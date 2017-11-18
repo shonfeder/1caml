@@ -13,15 +13,16 @@ This implementation is a work in progress and doesn't do much yet.
 | prerequisite | | version | how to install |
 |-|-|:-|-|
 | Opam | `>=` | [`2.0.0~beta4`](https://github.com/ocaml/opam/releases/tag/2.0.0-beta4) | manually or via package manager |
-| OCaml | `==` | `4.05.0+flambda` | `opam switch create 4.05.0+flambda` |
-| JBuilder | `>=` | [`1.0+beta16`](https://github.com/janestreet/jbuilder/releases/tag/1.0%2Bbeta16) | `opam install jbuilder` |
 
 ### Building
 
 ```
-$ jbuilder external-lib-deps --missing @install    # install deps
-$ jbuilder build @install                          # build artifacts
-$ jbuilder exec 1caml                              # invoke CLI
+$ git clone https://github.com/1caml/1caml
+$ cd 1caml
+$ opam switch create . 4.05.0+flambda     # create a local ocaml switch
+$ opam install . --deps-only              # install local dependencies
+$ opam exec jbuilder -- build @install    # build artifacts
+$ opam exec jbuilder -- exec 1caml        # invoke CLI
 ```
 
 ## Contributing
