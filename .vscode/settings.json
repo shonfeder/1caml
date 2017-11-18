@@ -6,6 +6,7 @@
   "editor.trimAutoWhitespace": true,
   "files.exclude": {
     "_build": true,
+    "_opam": true,
     "**/.merlin": true,
     "**/*.install": true
   },
