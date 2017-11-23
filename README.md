@@ -26,6 +26,12 @@ $ opam exec jbuilder -- build @install    # build artifacts
 $ opam exec jbuilder -- exec 1caml        # invoke CLI
 ```
 
+### Toplevel
+
+```
+$ opam exec jbuilder -- utop src/lib
+```
+
 ## Contributing
 
 Please see the following documents.
