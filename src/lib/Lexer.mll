@@ -7,7 +7,7 @@ module type SOURCE = sig
 end
 
 module type LEXER = sig
-  val token : lexbuf -> token Lwt.t
+  val token : lexbuf -> Token.t Lwt.t
 end
 type lexer = (module LEXER)
 
@@ -22,7 +22,15 @@ module Make (R : SOURCE) : LEXER = struct
 
   let keywords =
     make_table 1 [
+      ("def", KEYWORD_DEF);
+      ("fun", KEYWORD_FUN);
+      ("include", KEYWORD_INCLUDE);
+      ("mod", KEYWORD_MOD);
+      ("open", KEYWORD_OPEN);
+      ("sig", KEYWORD_SIG);
+      ("val", KEYWORD_VAL);
       ("type", KEYWORD_TYPE);
+      ("with", KEYWORD_WITH);
     ]
 }
 
