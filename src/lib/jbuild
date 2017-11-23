@@ -3,7 +3,7 @@
 (library
  ((name OneCaml)
   (public_name 1caml)
-  (libraries (fmt uuseg lwt.unix))
-  (preprocess (pps (lwt.ppx)))))
+  (libraries (fmt uuseg.string lwt.unix))
+  (preprocess (pps (lwt.ppx ppx_deriving.std)))))
 
 (ocamllex (Lexer))
