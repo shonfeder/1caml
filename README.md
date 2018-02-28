@@ -11,25 +11,39 @@ This implementation is a work in progress and doesn't do much yet.
 
 ### Prerequisites
 
-| prerequisite |      | version                                                                 | how to install                  |
-| ------------ | ---- | :---------------------------------------------------------------------- | ------------------------------- |
-| Opam         | `>=` | [`2.0.0~beta4`](https://github.com/ocaml/opam/releases/tag/2.0.0-beta4) | manually or via package manager |
+| prerequisite |      | version                                                                | how to install                  |
+| ------------ | ---- | :--------------------------------------------------------------------- | ------------------------------- |
+| Opam         | `>=` | [`1.2.2`](https://github.com/ocaml/opam/releases/tag/1.2.2)            | manually or via package manager |
+| OCaml        | `>=` | [`4.06.1+flambda`](https://github.com/ocaml/ocaml/releases/tag/4.06.1) | `opam switch 4.06.1+flambda`    |
+| utop         | `>=` | [`2.0.2`](https://github.com/diml/utop/releases/tag/2.0.2)             | `opam install utop` (optional)  |
 
-### Building
+### Installing Dependencies
 
 ```
 $ git clone https://github.com/1caml/1caml
 $ cd 1caml
-$ opam switch create . 4.05.0+flambda     # create a local ocaml switch
-$ opam install . --deps-only              # install local dependencies
-$ opam exec jbuilder -- build @install    # build artifacts
-$ opam exec jbuilder -- exec 1caml        # invoke CLI
+$ opam update
+$ opam pin add -y .
+```
+
+### Building
+
+```
+$ make
 ```
 
 ### Toplevel
 
+Requires `utop` (see prerequisites).
+
 ```
-$ opam exec jbuilder -- utop src/lib
+$ make top
+```
+
+### Tests
+
+```
+$ make test
 ```
 
 ## Contributing

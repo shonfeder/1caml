@@ -1,4 +1,6 @@
 {
+[@@@warning "-22"]
+
 open Lexing
 open Token
 
@@ -16,8 +18,8 @@ module Make (R : SOURCE) : LEXER = struct
     R.on_refill lexbuf >> k lexbuf
 
   let make_table num elems =
-    let table = Hashtbl.create num in
-    List.iter (fun (k, v) -> Hashtbl.add table k v) elems;
+    let table = Caml.Hashtbl.create num in
+    Caml.List.iter (fun (k, v) -> Caml.Hashtbl.add table k v) elems;
     table
 
   let keywords =
@@ -54,7 +56,7 @@ rule token = parse
 {
   let input = lexeme lexbuf in
   try
-    let kwd = Hashtbl.find keywords input in
+    let kwd = Caml.Hashtbl.find keywords input in
     Lwt.return kwd
   with Not_found ->
     Lwt.return (IDENTIFIER input)

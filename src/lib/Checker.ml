@@ -40,27 +40,27 @@ let check (gamma : Context.t) =
     let open Type in
     match gamma, ms, ts, fs, xs with
     (* halt *)
-    | gamma, ms, [], fs, xs -> Some (fs, xs)
+    | _gamma, _ms, [], fs, xs -> Some (fs, xs)
     (* id-hd *)
     | gamma, (Head :: ms), (IDENTIFIER t :: ts), fs, xs ->
       begin
-        match List.assoc_opt t gamma with
+        match Caml.List.assoc_opt t gamma with
         | Some tau -> go (Spine :: ms) ts (tau :: fs) xs
         | _ -> None
       end
     (* id-sp-[] *)
     | gamma, (Spine :: ms), (IDENTIFIER t :: ts), (Fun (sigma , tau) :: fs), [] ->
       begin
-        match List.assoc_opt t gamma with
+        match Caml.List.assoc_opt t gamma with
         | Some sigma' when Type.equal sigma' sigma -> go (Spine :: ms) ts (tau :: fs) []
         | _ -> None
       end
     (* id-sp-:: *)
-    | gamma, (Spine :: ms), ts, (Fun (sigma , tau) :: fs), (sigma' :: xs) when Type.equal sigma' sigma -> go (Spine :: ms) ts (tau :: fs) xs
+    | _gamma, (Spine :: ms), ts, (Fun (sigma , tau) :: fs), (sigma' :: xs) when Type.equal sigma' sigma -> go (Spine :: ms) ts (tau :: fs) xs
     (* lp *)
-    | gamma, ms, (LEFT_PARENTHESIS :: ts), fs, xs -> go (Head :: ms) ts fs xs
+    | _gamma, ms, (LEFT_PARENTHESIS :: ts), fs, xs -> go (Head :: ms) ts fs xs
     (* rp *)
-    | gamma, (m :: ms), (RIGHT_PARENTHESIS :: ts), (tau :: fs), [] -> go ms ts fs (tau :: [])
+    | _gamma, (_m :: ms), (RIGHT_PARENTHESIS :: ts), (tau :: fs), [] -> go ms ts fs (tau :: [])
     | _ -> None
   in
   go
