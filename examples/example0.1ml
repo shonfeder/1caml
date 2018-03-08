@@ -1,12 +1,12 @@
 // sugared
-sig OPT = {
+sig OPTION = {
   type T a
   val none 'a : T a
   val some 'a : a -> T a
   val case 'a 'b : T a -> b -> (a -> b) -> b
 }
 // unsugared
-def OPT = sig {
+def OPTION = sig {
   val T : (a : type) => type
   val none : ('a : type) => T a
   val some : ('a : type) => a -> T a
@@ -14,15 +14,15 @@ def OPT = sig {
 }
 
 // sugared
-mod Opt :> OPT = {
-  type Opt a = into ('b : type) => b -> (a -> b) -> b
+mod Option :> OPTION = {
+  type Option a = into ('b : type) => b -> (a -> b) -> b
   def none 'a = into fun (b : type) (n : b) (s : a -> b) => n
   def some 'a x = into fun (b : type) (n : b) (s : a -> b) => s x
   def case 'a 'b o = (from o) b
 }
 // unsugared
-def Opt :> OPT = mod {
-  def Opt = fun (a : type) => into ('b : type) => b -> (a -> b) -> b
+def Option :> OPTION = mod {
+  def Option = fun (a : type) => into ('b : type) => b -> (a -> b) -> b
   def none = fun ('a : type) => into fun (b : type) (n : b) (s : a -> b) => n
   def some = fun ('a : type) => fun (x : a) => into fun (b : type) (n : b) (s : a -> b) => s x
   def case = fun ('a : type) => fun ('b : type) => fun (o : t a) => (from o) b
@@ -31,12 +31,12 @@ def Opt :> OPT = mod {
 // sugared
 sig EQ = {
   type T
-  val eq : T -> T -> bool
+  val eq : T -> T -> Bool
 }
 // unsugared
 def EQ = sig {
   val T : type
-  val eq : T -> T -> bool
+  val eq : T -> T -> Bool
 }
 
 // sugared
@@ -44,7 +44,7 @@ sig MAP = {
   type Key
   type Map a
   val empty 'a : Map a
-  val lookup 'a : Key -> Map a -> Opt a  // Opt treated as Opt.T automatically?
+  val lookup 'a : Key -> Map a -> Option a  // Option treated as Option.T automatically?
   val add 'a : Key -> a -> Map a -> Map a
 }
 // unsugared
@@ -52,14 +52,14 @@ def MAP = sig {
   val Key : type
   val Map : (a : type) => type
   val empty : ('a : type) => Map a
-  val lookup : ('a : type) => Key -> Map a -> Opt a
+  val lookup : ('a : type) => Key -> Map a -> Option a
   val add : ('a : type) => Key -> a -> Map a -> Map a
 }
 
 mod Map (K : EQ) :> MAP with (type Key = K.T) = {
-  open Opt
+  open Option
   type Key = K.T
-  type Map a = Key -> Opt a
+  type Map a = Key -> Option a
   def empty = fun x => none
   def lookup x m = m x
   def add x y m = fun z => if Key.eq z x then some y else m z
@@ -70,7 +70,7 @@ sig COLLECTION c = {
   type Val
   val empty : c
   val add : c -> Key -> Val -> c
-  val lookup : c -> Key -> Opt Val
+  val lookup : c -> Key -> Option Val
   val keys : c -> List Key
 }
 
