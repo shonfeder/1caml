@@ -4,6 +4,14 @@ TODO:
 - explicit type lambdas
 *)
 
+module Polarity = struct
+  type t =
+    | Neutral
+    | Negative
+    | Positive
+  [@@deriving (compare, hash, sexp, show)]
+end
+
 module Principal = struct
   type t =
     | Yes
@@ -182,6 +190,8 @@ and Type : sig
   [@@deriving (compare, hash, sexp, show)]
 
   val has_metas : t -> bool
+  val polarity : t -> Polarity.t
+  val subsumes : Context.t -> t -> t -> Polarity.t -> Context.t option
   val valid : Context.t -> t -> unit Option.t
   val valid_and_principle : Context.t -> t -> Principal.t Option.t
 end = struct
@@ -214,6 +224,27 @@ end = struct
         has_metas typ
       | Meta _var ->
         true
+    end
+
+  let polarity typ =
+    begin match typ with
+      | All _ ->
+        Polarity.Negative
+      | Exi _ ->
+        Polarity.Positive
+      | _ ->
+        Polarity.Neutral
+    end
+
+  let rec subsumes _ctx lhs rhs pol =
+    let open Polarity in
+    begin match pol, lhs, rhs with
+      | Neutral, _, _ ->
+        failwith ""
+      | Negative, _, _ ->
+        failwith ""
+      | Positive, _, _ ->
+        failwith ""
     end
 
   let rec valid ctx typ =
@@ -321,7 +352,7 @@ end = struct
     let open Option.Let_syntax in
     begin match trm with
       | Unit ->
-      (* FIXME: not in paper *)
+        (* FIXME: not in paper *)
         let typ = Type.Unit in
         let pri = Principal.Yes in
         return Infer.{ ctx; typ; pri }
