@@ -70,10 +70,10 @@ end = struct
         let%bind dom = subst ctx dom in
         let%bind cod = subst ctx cod in
         return @@ Type.Fun_ { dom; cod }
-      | Type.All { typ; srt } ->
+      | Type.All { srt; typ } ->
         let%bind typ = subst ctx typ in
         return @@ Type.All { typ; srt }
-      | Type.Exi { typ; srt } ->
+      | Type.Exi { srt; typ } ->
         let%bind typ = subst ctx typ in
         return @@ Type.Exi { typ; srt }
       | Type.Meta meta ->
@@ -176,8 +176,8 @@ and Type : sig
     | Unit
     | Var of Var.t
     | Fun_ of { dom : t; cod : t }
-    | All of { typ : t; srt : Sort.t }
-    | Exi of { typ : t; srt : Sort.t }
+    | All of { srt : Sort.t; typ : t }
+    | Exi of { srt : Sort.t; typ : t }
     | Meta of Var.t
   [@@deriving (compare, hash, sexp, show)]
 
@@ -195,8 +195,8 @@ end = struct
     | Unit
     | Var of Var.t
     | Fun_ of { dom : t; cod : t }
-    | All of { typ : t; srt : Sort.t }
-    | Exi of { typ : t; srt : Sort.t }
+    | All of { srt : Sort.t; typ : t }
+    | Exi of { srt : Sort.t; typ : t }
     | Meta of Var.t
   [@@deriving (compare, hash, sexp, show)]
 
@@ -228,10 +228,10 @@ end = struct
         let%bind () = valid ctx dom in
         let%bind () = valid ctx cod in
         return ()
-      | All { typ; srt } ->
+      | All { srt; typ } ->
         let ctx = Context.Type { ctx; srt } in
         valid ctx typ
-      | Exi { typ; srt } ->
+      | Exi { srt; typ } ->
         let ctx = Context.Type { ctx; srt } in
         valid ctx typ
       | Meta _var ->
