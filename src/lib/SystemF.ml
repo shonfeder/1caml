@@ -1,5 +1,4 @@
 module Node = struct
-  [@@@warning "-27"]
   type +'a t = {
     tag : int;
     obj : 'a [@compare.ignore] [@hash.ignore];
