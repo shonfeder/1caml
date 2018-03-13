@@ -96,7 +96,7 @@ end = struct
       | Meta of { ctx : t Node.t }
       | Soln of { ctx : t Node.t; typ : Type.t Node.t }
     [@@deriving (compare, hash, sexp, show)]
-    let equal x y = [%compare.equal: t] x y
+    let equal = [%compare.equal: t]
   end
 
   module Cacher = struct
@@ -255,7 +255,7 @@ end = struct
       | Exi of { srt : Sort.t; typ : t Node.t }
       | Meta of { var : Var.t }
     [@@deriving (compare, hash, sexp, show)]
-    let equal x y = [%compare.equal: t] x y
+    let equal = [%compare.equal: t]
   end
 
   module Cacher = struct
@@ -386,7 +386,7 @@ end = struct
       | App of { hed : t Node.t; spi : t Node.t }
       | Ann of { trm : t Node.t; typ : Type.t Node.t }
     [@@deriving (compare, hash, sexp, show)]
-    let equal x y = [%compare.equal: t] x y
+    let equal = [%compare.equal: t]
   end
 
   module Cacher = struct
