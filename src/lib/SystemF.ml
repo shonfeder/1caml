@@ -1,9 +1,8 @@
 module Node = struct
   [@@@warning "-27"]
   type +'a t = {
-    tag : int ;
-    key : int [@compare.ignore];
-    obj : 'a  [@compare.ignore];
+    tag : int;
+    obj : 'a [@compare.ignore] [@hash.ignore];
   } [@@deriving (compare, hash, sexp, show)]
 end
 
@@ -27,7 +26,7 @@ end = struct
     begin try M.find table key with
       | Not_found ->
         let tag = tag () in
-        let res = Node.{ obj; key; tag } in
+        let res = Node.{ obj; tag } in
         M.add table key res;
         res
     end
@@ -159,11 +158,11 @@ and Type : sig
 
   module Cache () : sig
     val unit : t Node.t
-    val var : Var.t -> t Node.t
+    val var : var:Var.t -> t Node.t
     val fun_ : dom:t Node.t -> cod:t Node.t -> t Node.t
     val all : srt:Sort.t -> typ:t Node.t -> t Node.t
     val exi : srt:Sort.t -> typ:t Node.t -> t Node.t
-    val meta : Var.t -> t Node.t
+    val meta : var:Var.t -> t Node.t
   end
 
   val has_metas : t -> bool
@@ -192,11 +191,11 @@ end = struct
   module Cache () = struct
     include Interner(T)()
     let unit = intern @@ T.Unit
-    let var var = intern @@ T.Var { var }
+    let var ~var = intern @@ T.Var { var }
     let fun_ ~dom ~cod = intern @@ T.Fun { dom; cod }
     let all ~srt ~typ = intern @@ T.All { srt; typ }
     let exi ~srt ~typ = intern @@ T.Exi { srt; typ }
-    let meta var = intern @@ T.Meta { var }
+    let meta ~var = intern @@ T.Meta { var }
   end
 
   include T
@@ -233,7 +232,7 @@ and Term : sig
 
   module Cache () : sig
     val unit : t Node.t
-    val var : Var.t -> t Node.t
+    val var : var:Var.t -> t Node.t
     val lam : bod:t Node.t -> t Node.t
     val app : hed:t Node.t -> spi:t Node.t -> t Node.t
     val ann : trm:t Node.t -> typ:Type.t Node.t -> t Node.t
@@ -271,7 +270,7 @@ end = struct
   module Cache () = struct
     include Interner(T)()
     let unit = intern @@ T.Unit
-    let var var = intern @@ T.Var { var }
+    let var ~var = intern @@ T.Var { var }
     let lam ~bod = intern @@ T.Lam { bod }
     let app ~hed ~spi = intern @@ T.App { hed; spi }
     let ann ~trm ~typ = intern @@ T.Ann { trm; typ }

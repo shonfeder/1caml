@@ -19,9 +19,7 @@ module Infer = struct
     ITm.ann ~trm:ITm.unit ~typ:ITp.unit
 
   let test002 =
-    let e = ITm.lam (ITm.var 0) in
-    let e = ITm.app e e in
-    e
+    ITm.app (ITm.lam (ITm.var 0)) (ITm.lam (ITm.var 0))
 
   let () =
     let f i k =
