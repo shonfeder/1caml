@@ -18,15 +18,15 @@ end = struct
 
   let counter = ref 0
   let tag () = incr counter; !counter
-  let table = M.create 0
+  let cache = M.create 0
 
   let cache obj =
     let key = T.hash obj in
-    begin try M.find table key with
+    begin try M.find cache key with
       | Not_found ->
         let tag = tag () in
         let res = Node.{ obj; tag } in
-        M.add table key res;
+        M.add cache key res;
         res
     end
 end
