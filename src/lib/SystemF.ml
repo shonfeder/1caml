@@ -1,8 +1,37 @@
-(*
-TODO:
-- switch to spines
-- explicit type lambdas
-*)
+module Node = struct
+  [@@@warning "-27"]
+  type +'a t = {
+    tag : int ;
+    key : int [@compare.ignore];
+    obj : 'a  [@compare.ignore];
+  } [@@deriving (compare, hash, sexp, show)]
+end
+
+module Key = struct
+  type t = int
+  let equal = Int.equal
+  let hash = Fn.id
+end
+
+module Interner (T : Caml.Hashtbl.HashedType) () : sig
+  val intern : T.t -> T.t Node.t
+end = struct
+  module M = Ephemeron.K1.Make(Key)
+
+  let counter = ref 0
+  let tag () = incr counter; !counter
+  let table = M.create 0
+
+  let intern obj =
+    let key = T.hash obj in
+    begin try M.find table key with
+      | Not_found ->
+        let tag = tag () in
+        let res = Node.{ obj; key; tag } in
+        M.add table key res;
+        res
+    end
+end
 
 module Polarity = struct
   type t =
@@ -21,355 +50,248 @@ module Principal = struct
 end
 
 module Sort = struct
-  type t =
-    | Star
+  type t = Star
   [@@deriving (compare, hash, sexp, show)]
 end
 
 module rec Context : sig
-  type t =
+  type t = private
     | Stop
-    | Type of { ctx : t; srt : Sort.t }
-    | Term of { ctx : t; typ : Type.t; pri : Principal.t }
-    | Mark of { ctx : t; idx : Type.Var.t }
-    | Meta of t
-    | Soln of { ctx: t; typ: Type.t }
+    | Type of { ctx : t Node.t; srt : Sort.t }
+    | Term of { ctx : t Node.t; typ : Type.t Node.t; pri : Principal.t }
+    | Mark of { ctx : t Node.t; idx : Type.Var.t }
+    | Meta of { ctx : t Node.t }
+    | Soln of { ctx : t Node.t; typ: Type.t Node.t }
   [@@deriving (compare, hash, sexp, show)]
 
-  val subst : t -> Type.t -> Type.t option
+  module Cache () : sig
+    val stop : t Node.t
+    val type_ : ctx:t Node.t -> srt:Sort.t -> t Node.t
+    val term : ctx:t Node.t -> typ:Type.t Node.t -> pri:Principal.t -> t Node.t
+    val mark : ctx:t Node.t -> idx:Type.Var.t -> t Node.t
+    val meta : ctx:t Node.t -> t Node.t
+    val soln : ctx:t Node.t -> typ:Type.t Node.t -> t Node.t
+  end
+
+  val subst : t Node.t -> Type.t Node.t -> Type.t option
 
   module Term : sig
     module Lookup : sig
-      type t = {
-        typ : Type.t;
-        pri : Principal.t;
-      } [@@deriving (compare, hash, sexp, show)]
+      type t = { typ : Type.t Node.t; pri : Principal.t }
+      [@@deriving (compare, hash, sexp, show)]
     end
-    val lookup : t -> Term.Var.t -> Lookup.t option
+    val lookup : t Node.t -> Term.Var.t -> Lookup.t option
   end
 
   module Type : sig
     module Lookup : sig
-      type t = {
-        srt : Sort.t;
-      } [@@deriving (compare, hash, sexp, show)]
+      type t = { srt : Sort.t }
+      [@@deriving (compare, hash, sexp, show)]
     end
-    val lookup : t -> Type.Var.t -> Sort.t option
+    val lookup : t Node.t -> Type.Var.t -> Sort.t option
   end
 end = struct
-  type t =
-    | Stop
-    | Type of { ctx : t; srt : Sort.t }
-    | Term of { ctx : t; typ : Type.t; pri : Principal.t }
-    | Mark of { ctx : t; idx : Type.Var.t }
-    | Meta of t
-    | Soln of { ctx : t; typ : Type.t }
-  [@@deriving (compare, hash, sexp, show)]
+  module T = struct
+    type t =
+      | Stop
+      | Type of { ctx : t Node.t; srt : Sort.t }
+      | Term of { ctx : t Node.t; typ : Type.t Node.t; pri : Principal.t }
+      | Mark of { ctx : t Node.t; idx : Type.Var.t }
+      | Meta of { ctx : t Node.t }
+      | Soln of { ctx : t Node.t; typ : Type.t Node.t }
+    [@@deriving (compare, hash, sexp, show)]
+    let equal x y = [%compare.equal: t] x y
+  end
 
-  (* We assume lookups always succeed. Failure is ruled out by `ctx ⊢ tp`. *)
-  let rec subst ctx typ =
-    let open Option.Let_syntax in
-    begin match typ with
-      | Type.Unit ->
-        return typ
-      | Type.Var _ ->
-        return typ
-      | Type.Fun_ { dom; cod } ->
-        let%bind dom = subst ctx dom in
-        let%bind cod = subst ctx cod in
-        return @@ Type.Fun_ { dom; cod }
-      | Type.All { srt; typ } ->
-        let%bind typ = subst ctx typ in
-        return @@ Type.All { typ; srt }
-      | Type.Exi { srt; typ } ->
-        let%bind typ = subst ctx typ in
-        return @@ Type.Exi { typ; srt }
-      | Type.Meta meta ->
-        resolve ctx meta
-    end
+  module Cache () = struct
+    include Interner(T)()
+    let stop = intern @@ T.Stop
+    let type_ ~ctx ~srt = intern @@ T.Type { ctx; srt }
+    let term ~ctx ~typ ~pri = intern @@ T.Term { ctx; typ; pri }
+    let mark ~ctx ~idx = intern @@ T.Mark { ctx; idx }
+    let meta ~ctx = intern @@ T.Meta { ctx }
+    let soln ~ctx ~typ = intern @@ T.Soln { ctx; typ }
+  end
 
-  and resolve ctx meta =
-    (* Create a closure to remember the original value of meta. *)
-    let rec go ctx idx =
-      begin match idx, ctx with
-        | Type.Var.Mk 0, Meta _ctx ->
-          Some (Type.Meta meta)
-        | Type.Var.Mk 0, Soln { ctx; typ } ->
-          subst ctx typ
-        | Type.Var.Mk 0, _ctx ->
-          None
-        | Type.Var.Mk _idx, Stop ->
-          None
-        | Type.Var.Mk idx, Type { ctx } ->
-          go ctx @@ Type.Var.mk @@ idx - 1
-        | Type.Var.Mk idx, Term { ctx } ->
-          go ctx @@ Type.Var.mk @@ idx - 1
-        | Type.Var.Mk idx, Mark { ctx } ->
-          go ctx @@ Type.Var.mk @@ idx - 1
-        | Type.Var.Mk idx, Meta ctx ->
-          go ctx @@ Type.Var.mk @@ idx - 1
-        | Type.Var.Mk idx, Soln { ctx } ->
-          go ctx @@ Type.Var.mk @@ idx - 1
-      end in
-    go ctx meta
+  include T
+
+  let rec subst _ctx _typ =
+    failwith ""
+
+  and resolve _ctx _meta =
+    failwith ""
 
   module Term = struct
     module Lookup = struct
-      type t = {
-        typ : Type.t;
-        pri : Principal.t;
-      } [@@deriving (compare, hash, sexp, show)]
+      type t = { typ : Type.t Node.t; pri : Principal.t }
+      [@@deriving (compare, hash, sexp, show)]
     end
 
-    let rec lookup ctx idx =
-      let open Option.Let_syntax in
-      begin match idx, ctx with
-        | Term.Var.Mk 0, Term { typ; pri } ->
-          return Lookup.{ typ; pri }
-        | Term.Var.Mk 0, _ ->
-          None
-        | Term.Var.Mk _idx, Stop ->
-          None
-        | Term.Var.Mk idx, Type { ctx } ->
-          lookup ctx @@ Term.Var.mk @@ idx - 1
-        | Term.Var.Mk idx, Term { ctx } ->
-          lookup ctx @@ Term.Var.mk @@ idx - 1
-        | Term.Var.Mk idx, Mark { ctx } ->
-          lookup ctx @@ Term.Var.mk @@ idx - 1
-        | Term.Var.Mk idx, Meta ctx ->
-          lookup ctx @@ Term.Var.mk @@ idx - 1
-        | Term.Var.Mk idx, Soln { ctx } ->
-          lookup ctx @@ Term.Var.mk @@ idx - 1
-      end
+    let rec lookup _ctx _idx =
+      failwith ""
   end
 
   module Type = struct
     module Lookup = struct
-      type t = {
-        srt : Sort.t;
-      } [@@deriving (compare, hash, sexp, show)]
+      type t = { srt : Sort.t }
+      [@@deriving (compare, hash, sexp, show)]
     end
 
-    let rec lookup ctx idx =
-      let open Option.Let_syntax in
-      begin match idx, ctx with
-        | Type.Var.Mk 0, Type { srt } ->
-          return srt
-        | Type.Var.Mk 0, _ ->
-          None
-        | Type.Var.Mk _idx, Stop ->
-          None
-        | Type.Var.Mk idx, Type { ctx } ->
-          lookup ctx @@ Type.Var.mk @@ idx - 1
-        | Type.Var.Mk idx, Term { ctx } ->
-          lookup ctx @@ Type.Var.mk @@ idx - 1
-        | Type.Var.Mk idx, Mark { ctx } ->
-          lookup ctx @@ Type.Var.mk @@ idx - 1
-        | Type.Var.Mk idx, Meta ctx ->
-          lookup ctx @@ Type.Var.mk @@ idx - 1
-        | Type.Var.Mk idx, Soln { ctx } ->
-          lookup ctx @@ Type.Var.mk @@ idx - 1
-      end
+    let rec lookup _ctx _idx =
+      failwith ""
   end
 end
 
 and Type : sig
   module Var : sig
-    type t = Mk of int
+    type t = int
     [@@deriving (compare, hash, sexp, show)]
-    val mk : int -> t
   end
 
-  type t =
+  type t = private
     | Unit
-    | Var of Var.t
-    | Fun_ of { dom : t; cod : t }
-    | All of { srt : Sort.t; typ : t }
-    | Exi of { srt : Sort.t; typ : t }
-    | Meta of Var.t
+    | Var of { var : Var.t }
+    | Fun of { dom : t Node.t; cod : t Node.t }
+    | All of { srt : Sort.t; typ : t Node.t }
+    | Exi of { srt : Sort.t; typ : t Node.t }
+    | Meta of { var : Var.t }
   [@@deriving (compare, hash, sexp, show)]
+
+  module Cache () : sig
+    val unit : t Node.t
+    val var : Var.t -> t Node.t
+    val fun_ : dom:t Node.t -> cod:t Node.t -> t Node.t
+    val all : srt:Sort.t -> typ:t Node.t -> t Node.t
+    val exi : srt:Sort.t -> typ:t Node.t -> t Node.t
+    val meta : Var.t -> t Node.t
+  end
 
   val has_metas : t -> bool
   val polarity : t -> Polarity.t
-  val subsumes : Context.t -> t -> t -> Polarity.t -> Context.t option
-  val valid : Context.t -> t -> unit Option.t
-  val valid_and_principle : Context.t -> t -> Principal.t Option.t
+  val subsumes : Context.t Node.t -> t Node.t -> t Node.t -> Polarity.t -> Context.t option
+  val valid : Context.t Node.t -> t Node.t -> unit Option.t
+  val valid_and_principle : Context.t Node.t -> t Node.t -> Principal.t Option.t
 end = struct
   module Var = struct
-    type t = Mk of int
+    type t = int
     [@@deriving (compare, hash, sexp, show)]
-    let mk idx = Mk idx
   end
 
-  type t =
-    | Unit
-    | Var of Var.t
-    | Fun_ of { dom : t; cod : t }
-    | All of { srt : Sort.t; typ : t }
-    | Exi of { srt : Sort.t; typ : t }
-    | Meta of Var.t
-  [@@deriving (compare, hash, sexp, show)]
+  module T = struct
+    type t =
+      | Unit
+      | Var of { var : Var.t }
+      | Fun of { dom : t Node.t; cod : t Node.t }
+      | All of { srt : Sort.t; typ : t Node.t }
+      | Exi of { srt : Sort.t; typ : t Node.t }
+      | Meta of { var : Var.t }
+    [@@deriving (compare, hash, sexp, show)]
+    let equal x y = [%compare.equal: t] x y
+  end
 
-  let rec has_metas typ =
-    begin match typ with
-      | Unit ->
-        false
-      | Var _var ->
-        false
-      | Fun_ { dom; cod } ->
-        has_metas dom || has_metas cod
-      | All { typ } ->
-        has_metas typ
-      | Exi { typ } ->
-        has_metas typ
-      | Meta _var ->
-        true
-    end
+  module Cache () = struct
+    include Interner(T)()
+    let unit = intern @@ T.Unit
+    let var var = intern @@ T.Var { var }
+    let fun_ ~dom ~cod = intern @@ T.Fun { dom; cod }
+    let all ~srt ~typ = intern @@ T.All { srt; typ }
+    let exi ~srt ~typ = intern @@ T.Exi { srt; typ }
+    let meta var = intern @@ T.Meta { var }
+  end
 
-  let polarity typ =
-    begin match typ with
-      | All _ ->
-        Polarity.Negative
-      | Exi _ ->
-        Polarity.Positive
-      | _ ->
-        Polarity.Neutral
-    end
+  include T
 
-  let rec subsumes _ctx lhs rhs pol =
-    let open Polarity in
-    begin match pol, lhs, rhs with
-      | Neutral, _, _ ->
-        failwith ""
-      | Negative, _, _ ->
-        failwith ""
-      | Positive, _, _ ->
-        failwith ""
-    end
+  let rec has_metas _typ =
+    failwith ""
 
-  let rec valid ctx typ =
-    let open Option.Let_syntax in
-    begin match typ with
-      | Unit ->
-        return ()
-      | Var idx ->
-        let%bind Sort.Star = Context.Type.lookup ctx idx in
-        return ()
-      | Fun_ { dom; cod } ->
-        let%bind () = valid ctx dom in
-        let%bind () = valid ctx cod in
-        return ()
-      | All { srt; typ } ->
-        let ctx = Context.Type { ctx; srt } in
-        valid ctx typ
-      | Exi { srt; typ } ->
-        let ctx = Context.Type { ctx; srt } in
-        valid ctx typ
-      | Meta _var ->
-        failwith @@ [%derive.show: _] (ctx, typ)
-    end
+  let polarity _typ =
+    failwith ""
 
-  let valid_and_principle ctx typ =
-    let open Option.Let_syntax in
-    let%bind () = valid ctx typ in
-    let%bind typ = Context.subst ctx typ in
-    if Type.has_metas typ then
-      return Principal.No
-    else
-      return Principal.Yes
+  let rec subsumes _ctx _lhs _rhs _pol =
+    failwith ""
+
+  let rec valid _ctx _typ =
+    failwith ""
+
+  let valid_and_principle _ctx _typ =
+    failwith ""
 end
 
 and Term : sig
   module Var : sig
-    type t = Mk of int
+    type t = int
     [@@deriving (compare, hash, sexp, show)]
-    val mk : int -> t
   end
 
-  type t =
+  type t = private
     | Unit
-    | Var of Var.t
-    | Lam of t
-    | App of { hed : t; spi : t }
-    | Ann of { trm : t; typ : Type.t }
+    | Var of { var : Var.t }
+    | Lam of { bod : t Node.t }
+    | App of { hed : t Node.t; spi : t Node.t }
+    | Ann of { trm : t Node.t; typ : Type.t Node.t }
   [@@deriving (compare, hash, sexp, show)]
 
+  module Cache () : sig
+    val unit : t Node.t
+    val var : Var.t -> t Node.t
+    val lam : bod:t Node.t -> t Node.t
+    val app : hed:t Node.t -> spi:t Node.t -> t Node.t
+    val ann : trm:t Node.t -> typ:Type.t Node.t -> t Node.t
+  end
+
   module Check : sig
-    type t = {
-      ctx : Context.t;
-    } [@@deriving (compare, hash, sexp, show)]
+    type t = { ctx : Context.t Node.t }
+    [@@deriving (compare, hash, sexp, show)]
   end
 
   module Infer : sig
-    type t = {
-      ctx : Context.t;
-      typ : Type.t;
-      pri : Principal.t;
-    } [@@deriving (compare, hash, sexp, show)]
+    type t = { ctx : Context.t Node.t; typ : Type.t Node.t; pri : Principal.t }
+    [@@deriving (compare, hash, sexp, show)]
   end
 
-  val check : Context.t -> t -> Type.t -> Principal.t -> Check.t option
-  val infer : Context.t -> t -> Infer.t option
+  val check : Context.t Node.t -> t Node.t -> Type.t Node.t -> Principal.t -> Check.t option
+  val infer : Context.t Node.t -> t Node.t -> Infer.t option
 end = struct
   module Var = struct
-    type t = Mk of int
+    type t = int
     [@@deriving (compare, hash, sexp, show)]
-    let mk idx = Mk idx
   end
 
-  type t =
-    | Unit
-    | Var of Var.t
-    | Lam of t
-    | App of { hed : t; spi : t }
-    | Ann of { trm : t; typ : Type.t }
-  [@@deriving (compare, hash, sexp, show)]
+  module T = struct
+    type t =
+      | Unit
+      | Var of { var : Var.t }
+      | Lam of { bod : t Node.t }
+      | App of { hed : t Node.t; spi : t Node.t }
+      | Ann of { trm : t Node.t; typ : Type.t Node.t }
+    [@@deriving (compare, hash, sexp, show)]
+    let equal x y = [%compare.equal: t] x y
+  end
+
+  module Cache () = struct
+    include Interner(T)()
+    let unit = intern @@ T.Unit
+    let var var = intern @@ T.Var { var }
+    let lam ~bod = intern @@ T.Lam { bod }
+    let app ~hed ~spi = intern @@ T.App { hed; spi }
+    let ann ~trm ~typ = intern @@ T.Ann { trm; typ }
+  end
+
+  include T
 
   module Check = struct
-    type t = {
-      ctx : Context.t;
-    } [@@deriving (compare, hash, sexp, show)]
+    type t = { ctx : Context.t Node.t }
+    [@@deriving (compare, hash, sexp, show)]
   end
 
   module Infer = struct
-    type t = {
-      ctx : Context.t;
-      typ : Type.t;
-      pri : Principal.t;
-    } [@@deriving (compare, hash, sexp, show)]
+    type t = { ctx : Context.t Node.t; typ : Type.t Node.t; pri : Principal.t }
+    [@@deriving (compare, hash, sexp, show)]
   end
 
-  let rec check ctx trm typ pri =
-    let open Option.Let_syntax in
-    begin match trm, typ, pri with
-      | Unit, Type.Unit, _pri ->
-        return Check.{ ctx }
-      | _ ->
-        failwith @@ [%derive.show: _] (ctx, trm, typ, pri)
-    end
+  let rec check _ctx _trm _typ _pri =
+    failwith ""
 
-  and infer ctx trm =
-    let open Option.Let_syntax in
-    begin match trm with
-      | Unit ->
-        (* FIXME: not in paper *)
-        let typ = Type.Unit in
-        let pri = Principal.Yes in
-        return Infer.{ ctx; typ; pri }
-      | Var idx ->
-        let%bind Context.Term.Lookup.{ typ; pri } = Context.Term.lookup ctx idx in
-        return Infer.{ ctx; typ; pri }
-      | Ann { trm; typ } ->
-        begin match%bind Type.valid_and_principle ctx typ with
-          | Principal.Yes as pri ->
-            let%bind typ' = Context.subst ctx typ in
-            let%bind Check.{ ctx } = check ctx trm typ' pri in
-            let%bind typ = Context.subst ctx typ' in
-            return Infer.{ ctx; typ; pri }
-          | _ ->
-            None
-        end
-      | _ ->
-        failwith @@ [%derive.show: _] (ctx, trm)
-    end
+  and infer _ctx _trm =
+    failwith ""
 end
