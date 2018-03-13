@@ -5,28 +5,47 @@ module Node = struct
   } [@@deriving (compare, hash, sexp, show)]
 end
 
-module Key = struct
+module Tag = struct
   type t = int
   let equal = Int.equal
   let hash = Fn.id
 end
 
-module Caching (T : Caml.Hashtbl.HashedType) () : sig
-  val cache : T.t -> T.t Node.t
+module Internable (T : Caml.Hashtbl.HashedType) () : sig
+  val intern : T.t -> T.t Node.t
 end = struct
-  module M = Ephemeron.K1.Make(Key)
+  module M = Ephemeron.K1.Make(Tag)
 
   let counter = ref 0
   let tag () = incr counter; !counter
   let cache = M.create 0
 
-  let cache obj =
+  let intern obj =
     let key = T.hash obj in
     begin try M.find cache key with
       | Not_found ->
         let tag = tag () in
         let res = Node.{ obj; tag } in
         M.add cache key res;
+        res
+    end
+end
+
+(* FIXME: Determine how much overhead using Lazy.t entails. We could do this
+   more efficiently with a custom ppx instead of creating thunks. *)
+module Memoizer (T : sig type t end) : sig
+  type key = int Array.t
+  val cache : key -> T.t Lazy.t -> T.t
+end = struct
+  include Ephemeron.Kn.Make(Tag)
+
+  let table : T.t t = create 0
+
+  let cache key thunk =
+    begin try find table key with
+      | Not_found ->
+        let res = Lazy.force thunk in
+        add table key res;
         res
     end
 end
@@ -99,62 +118,76 @@ end = struct
     let equal = [%compare.equal: t]
   end
 
-  module Cacher = struct
-    include Caching(T)()
-    let stop () = cache @@ T.Stop
-    let type_ ~ctx ~srt = cache @@ T.Type { ctx; srt }
-    let term ~ctx ~typ ~pri = cache @@ T.Term { ctx; typ; pri }
-    let mark ~ctx ~var = cache @@ T.Mark { ctx; var }
-    let meta ~ctx = cache @@ T.Meta { ctx }
-    let soln ~ctx ~typ = cache @@ T.Soln { ctx; typ }
+  module Interner = struct
+    include Internable(T)()
+    let stop () = intern @@ T.Stop
+    let type_ ~ctx ~srt = intern @@ T.Type { ctx; srt }
+    let term ~ctx ~typ ~pri = intern @@ T.Term { ctx; typ; pri }
+    let mark ~ctx ~var = intern @@ T.Mark { ctx; var }
+    let meta ~ctx = intern @@ T.Meta { ctx }
+    let soln ~ctx ~typ = intern @@ T.Soln { ctx; typ }
   end
 
-  include Cacher
+  include Interner
   include T
 
-  let rec subst ctx typ =
+  let rec subst =
+    (* subst: cache is checked on every recursive call *)
+    let module M = Memoizer(struct type t = Type.t Node.t option end) in
     let open Option.Let_syntax in
-    begin match typ.Node.obj with
-      | Type.Unit ->
-        return typ
-      | Type.Var _ ->
-        return typ
-      | Type.Fun { dom; cod } ->
-        let%bind dom = subst ctx dom in
-        let%bind cod = subst ctx cod in
-        return @@ Type.fun_ ~dom ~cod
-      | Type.All { srt; typ } ->
-        let%bind typ = subst ctx typ in
-        return @@ Type.all ~srt ~typ
-      | Type.Exi { srt; typ } ->
-        return @@ Type.exi ~srt ~typ
-      | Type.Meta { var } ->
-        return @@ Type.meta ~var
-    end
-
-  and resolve ctx var =
-    let rec go ctx idx =
-      begin match idx, ctx.Node.obj with
-        | 0, Meta _ctx ->
-          Some (Type.meta ~var)
-        | 0, Soln { ctx; typ } ->
-          subst ctx typ
-        | 0, _ctx ->
-          None
-        | _idx, Stop ->
-          None
-        | idx, Type { ctx } ->
-          go ctx @@ idx - 1
-        | idx, Term { ctx } ->
-          go ctx @@ idx - 1
-        | idx, Mark { ctx } ->
-          go ctx @@ idx - 1
-        | idx, Meta {ctx } ->
-          go ctx @@ idx - 1
-        | idx, Soln { ctx } ->
-          go ctx @@ idx - 1
+    let rec go ctx typ =
+      M.cache [| ctx.Node.tag; typ.Node.tag |] begin lazy
+        begin match typ.Node.obj with
+          | Type.Unit ->
+            return typ
+          | Type.Var _ ->
+            return typ
+          | Type.Fun { dom; cod } ->
+            let%bind dom = go ctx dom in
+            let%bind cod = go ctx cod in
+            return @@ Type.fun_ ~dom ~cod
+          | Type.All { srt; typ } ->
+            let%bind typ = go ctx typ in
+            return @@ Type.all ~srt ~typ
+          | Type.Exi { srt; typ } ->
+            return @@ Type.exi ~srt ~typ
+          | Type.Meta { var } ->
+            resolve ctx var
+        end
       end in
-    go ctx var
+    go
+
+  and resolve =
+    (* resolve: cache is checked only on initial call *)
+    let module M = Memoizer(struct type t = Type.t Node.t option end) in
+    let go init =
+      (* create a closure to remember init *)
+      let rec go ctx idx =
+        begin match idx, ctx.Node.obj with
+          | 0, Meta _ctx ->
+            Some (Type.meta init)
+          | 0, Soln { ctx; typ } ->
+            subst ctx typ
+          | 0, _ctx ->
+            None
+          | _idx, Stop ->
+            None
+          | idx, Type { ctx } ->
+            go ctx @@ idx - 1
+          | idx, Term { ctx } ->
+            go ctx @@ idx - 1
+          | idx, Mark { ctx } ->
+            go ctx @@ idx - 1
+          | idx, Meta {ctx } ->
+            go ctx @@ idx - 1
+          | idx, Soln { ctx } ->
+            go ctx @@ idx - 1
+        end in
+      go in
+    fun ctx var ->
+      M.cache [| ctx.Node.tag; var |] begin lazy
+        begin go var ctx var end
+      end
 
   module Term = struct
     module Lookup = struct
@@ -162,26 +195,33 @@ end = struct
       [@@deriving (compare, hash, sexp, show)]
     end
 
-    let rec lookup ctx idx =
+    let lookup =
+      (* lookup: cache is checked only on initial call *)
+      let module M = Memoizer(struct type t = Lookup.t option end) in
       let open Option.Let_syntax in
-      begin match idx, ctx.Node.obj with
-        | 0, Term { typ; pri } ->
-          return Lookup.{ typ; pri }
-        | 0, _ ->
-          None
-        | _idx, Stop ->
-          None
-        | idx, Type { ctx } ->
-          lookup ctx @@ idx - 1
-        | idx, Term { ctx } ->
-          lookup ctx @@ idx - 1
-        | idx, Mark { ctx } ->
-          lookup ctx @@ idx - 1
-        | idx, Meta { ctx } ->
-          lookup ctx @@ idx - 1
-        | idx, Soln { ctx } ->
-          lookup ctx @@ idx - 1
-      end
+      let rec go ctx idx =
+        begin match idx, ctx.Node.obj with
+          | 0, Term { typ; pri } ->
+            return Lookup.{ typ; pri }
+          | 0, _ ->
+            None
+          | _idx, Stop ->
+            None
+          | idx, Type { ctx } ->
+            go ctx @@ idx - 1
+          | idx, Term { ctx } ->
+            go ctx @@ idx - 1
+          | idx, Mark { ctx } ->
+            go ctx @@ idx - 1
+          | idx, Meta { ctx } ->
+            go ctx @@ idx - 1
+          | idx, Soln { ctx } ->
+            go ctx @@ idx - 1
+        end in
+      fun ctx idx ->
+        M.cache [| ctx.Node.tag; idx |] begin lazy
+          begin go ctx idx end
+        end
   end
 
   module Type = struct
@@ -190,26 +230,33 @@ end = struct
       [@@deriving (compare, hash, sexp, show)]
     end
 
-    let rec lookup ctx idx =
+    let lookup =
+      (* lookup: cache is checked only on initial call *)
+      let module M = Memoizer(struct type t = Sort.t option end) in
       let open Option.Let_syntax in
-      begin match idx, ctx.Node.obj with
-        | 0, Type { srt } ->
-          return srt
-        | 0, _ ->
-          None
-        | _idx, Stop ->
-          None
-        | idx, Type { ctx } ->
-          lookup ctx @@ idx - 1
-        | idx, Term { ctx } ->
-          lookup ctx @@ idx - 1
-        | idx, Mark { ctx } ->
-          lookup ctx @@ idx - 1
-        | idx, Meta { ctx } ->
-          lookup ctx @@ idx - 1
-        | idx, Soln { ctx } ->
-          lookup ctx @@ idx - 1
-      end
+      let rec go ctx idx =
+        begin match idx, ctx.Node.obj with
+          | 0, Type { srt } ->
+            return srt
+          | 0, _ ->
+            None
+          | _idx, Stop ->
+            None
+          | idx, Type { ctx } ->
+            go ctx @@ idx - 1
+          | idx, Term { ctx } ->
+            go ctx @@ idx - 1
+          | idx, Mark { ctx } ->
+            go ctx @@ idx - 1
+          | idx, Meta { ctx } ->
+            go ctx @@ idx - 1
+          | idx, Soln { ctx } ->
+            go ctx @@ idx - 1
+        end in
+      fun ctx idx ->
+        M.cache [| ctx.Node.tag; idx |] begin lazy
+          begin go ctx idx end
+        end
   end
 end
 
@@ -258,34 +305,40 @@ end = struct
     let equal = [%compare.equal: t]
   end
 
-  module Cacher = struct
-    include Caching(T)()
-    let unit () = cache @@ T.Unit
-    let var ~var = cache @@ T.Var { var }
-    let fun_ ~dom ~cod = cache @@ T.Fun { dom; cod }
-    let all ~srt ~typ = cache @@ T.All { srt; typ }
-    let exi ~srt ~typ = cache @@ T.Exi { srt; typ }
-    let meta ~var = cache @@ T.Meta { var }
+  module Interner = struct
+    include Internable(T)()
+    let unit () = intern @@ T.Unit
+    let var ~var = intern @@ T.Var { var }
+    let fun_ ~dom ~cod = intern @@ T.Fun { dom; cod }
+    let all ~srt ~typ = intern @@ T.All { srt; typ }
+    let exi ~srt ~typ = intern @@ T.Exi { srt; typ }
+    let meta ~var = intern @@ T.Meta { var }
   end
 
-  include Cacher
+  include Interner
   include T
 
-  let rec has_metas typ =
-    begin match typ.Node.obj with
-      | Unit ->
-        false
-      | Var _var ->
-        false
-      | Fun { dom; cod } ->
-        has_metas dom || has_metas cod
-      | All { typ } ->
-        has_metas typ
-      | Exi { typ } ->
-        has_metas typ
-      | Meta _var ->
-        true
-    end
+  let has_metas =
+    (* has_metas: cache is checked on every recursive call *)
+    let module M = Memoizer(struct type t = bool end) in
+    let rec go typ =
+      M.cache [| typ.Node.tag |] begin lazy
+        begin match typ.Node.obj with
+          | Unit ->
+            false
+          | Var _var ->
+            false
+          | Fun { dom; cod } ->
+            go dom || go cod
+          | All { typ } ->
+            go typ
+          | Exi { typ } ->
+            go typ
+          | Meta _var ->
+            true
+        end
+      end in
+    go
 
   let polarity typ =
     begin match typ.Node.obj with
@@ -308,29 +361,35 @@ end = struct
         failwith ""
     end
 
-  let rec valid ctx typ =
+  let valid =
+    (* valid: cache is checked on every recursive call *)
+    let module M = Memoizer(struct type t = unit option end) in
     let open Option.Let_syntax in
-    begin match typ.Node.obj with
-      | Type.Unit ->
-        return ()
-      | Type.Var { var } ->
-        let%bind Sort.Star = Context.Type.lookup ctx var in
-        return ()
-      | Type.Fun { dom; cod } ->
-        let%bind () = valid ctx dom in
-        let%bind () = valid ctx cod in
-        return ()
-      | Type.All { srt; typ } ->
-        let ctx = Context.type_ ~ctx ~srt in
-        valid ctx typ
-      | Type.Exi { srt; typ } ->
-        let ctx = Context.type_ ~ctx ~srt in
-        valid ctx typ
-      | Type.Meta _var ->
-        failwith @@ [%derive.show: _] (ctx, typ)
-    end
+    let rec go ctx typ =
+      M.cache [| ctx.Node.tag; typ.Node.tag |] begin lazy
+        begin match typ.Node.obj with
+          | Type.Unit ->
+            return ()
+          | Type.Var { var } ->
+            let%bind Sort.Star = Context.Type.lookup ctx var in
+            return ()
+          | Type.Fun { dom; cod } ->
+            let%bind () = go ctx dom in
+            let%bind () = go ctx cod in
+            return ()
+          | Type.All { srt; typ } ->
+            let ctx = Context.type_ ~ctx ~srt in
+            go ctx typ
+          | Type.Exi { srt; typ } ->
+            let ctx = Context.type_ ~ctx ~srt in
+            go ctx typ
+          | Type.Meta _var ->
+            failwith @@ [%derive.show: _] (ctx, typ)
+        end
+      end in
+    go
 
-  let valid_and_principle ctx typ : Principal.t Option.t =
+  let valid_and_principle ctx typ =
     let open Option.Let_syntax in
     let%bind () = valid ctx typ in
     let%bind typ = Context.subst ctx typ in
@@ -389,16 +448,16 @@ end = struct
     let equal = [%compare.equal: t]
   end
 
-  module Cacher = struct
-    include Caching(T)()
-    let unit () = cache @@ T.Unit
-    let var ~var = cache @@ T.Var { var }
-    let lam ~bod = cache @@ T.Lam { bod }
-    let app ~hed ~spi = cache @@ T.App { hed; spi }
-    let ann ~trm ~typ = cache @@ T.Ann { trm; typ }
+  module Interner = struct
+    include Internable(T)()
+    let unit () = intern @@ T.Unit
+    let var ~var = intern @@ T.Var { var }
+    let lam ~bod = intern @@ T.Lam { bod }
+    let app ~hed ~spi = intern @@ T.App { hed; spi }
+    let ann ~trm ~typ = intern @@ T.Ann { trm; typ }
   end
 
-  include Cacher
+  include Interner
   include T
 
   module Check = struct
@@ -411,37 +470,49 @@ end = struct
     [@@deriving (compare, hash, sexp, show)]
   end
 
-  let rec check (ctx : Context.t Node.t) (trm : Term.t Node.t) (typ : Type.t Node.t) (pri : Principal.t) =
+  let rec check =
+    (* check: cache is checked on every recursive call *)
+    let module M = Memoizer(struct type t = Check.t option end) in
     let open Option.Let_syntax in
-    begin match trm.Node.obj, typ.Node.obj, pri with
-      | Term.Unit, Type.Unit, _pri ->
-        return Check.{ ctx }
-      | _, _, _ ->
-        failwith @@ [%derive.show: _] (ctx, trm, typ, pri)
-    end
-
-  and infer ctx trm =
-    let open Option.Let_syntax in
-    begin match trm.Node.obj with
-      | Term.Unit ->
-        (* FIXME: not in paper *)
-        let typ = Type.unit () in
-        let pri = Principal.Yes in
-        return Infer.{ ctx; typ; pri }
-      | Term.Var { var } ->
-        let%bind Context.Term.Lookup.{ typ; pri } = Context.Term.lookup ctx var in
-        return Infer.{ ctx; typ; pri }
-      | Term.Ann { trm; typ } ->
-        begin match%bind Type.valid_and_principle ctx typ with
-          | Principal.Yes as pri ->
-            let%bind typ' = Context.subst ctx typ in
-            let%bind Check.{ ctx } = check ctx trm typ' pri in
-            let%bind typ = Context.subst ctx typ' in
-            return Infer.{ ctx; typ; pri }
-          | _ ->
-            None
+    let rec go ctx trm typ pri =
+      M.cache [| ctx.Node.tag; trm.Node.tag; typ.Node.tag; Principal.hash pri |] begin lazy
+        begin match trm.Node.obj, typ.Node.obj, pri with
+          | Term.Unit, Type.Unit, _pri ->
+            return Check.{ ctx }
+          | _, _, _ ->
+            failwith @@ [%derive.show: _] (ctx, trm, typ, pri)
         end
-      | _ ->
-        failwith ""
-    end
+      end in
+    go
+
+  and infer =
+    (* infer: cache is checked on every recursive call *)
+    let open Option.Let_syntax in
+    let module M = Memoizer(struct type t = Infer.t option end) in
+    let rec go ctx trm =
+      M.cache [| ctx.Node.tag; trm.Node.tag |] begin lazy
+        begin match trm.Node.obj with
+          | Term.Unit ->
+            (* FIXME: not in paper *)
+            let typ = Type.unit () in
+            let pri = Principal.Yes in
+            return Infer.{ ctx; typ; pri }
+          | Term.Var { var } ->
+            let%bind Context.Term.Lookup.{ typ; pri } = Context.Term.lookup ctx var in
+            return Infer.{ ctx; typ; pri }
+          | Term.Ann { trm; typ } ->
+            begin match%bind Type.valid_and_principle ctx typ with
+              | Principal.Yes as pri ->
+                let%bind typ' = Context.subst ctx typ in
+                let%bind Check.{ ctx } = check ctx trm typ' pri in
+                let%bind typ = Context.subst ctx typ' in
+                return Infer.{ ctx; typ; pri }
+              | _ ->
+                None
+            end
+          | _ ->
+            failwith ""
+        end
+      end in
+    go
 end
