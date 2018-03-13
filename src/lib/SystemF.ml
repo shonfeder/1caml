@@ -121,8 +121,8 @@ end = struct
       | Type.Var _ ->
         return typ
       | Type.Fun { dom; cod } ->
-        let%bind _dom = subst ctx dom in
-        let%bind _cod = subst ctx cod in
+        let%bind dom = subst ctx dom in
+        let%bind cod = subst ctx cod in
         return @@ Type.fun_ ~dom ~cod
       | Type.All { srt; typ } ->
         let%bind typ = subst ctx typ in
