@@ -34,12 +34,11 @@ end
 (* FIXME: Determine how much overhead using Lazy.t entails. We could do this
    more efficiently with a custom ppx instead of creating thunks. *)
 module Memoizer (T : sig type t end) : sig
-  type key = int Array.t
-  val cache : key -> T.t Lazy.t -> T.t
+  val cache : int Array.t -> T.t Lazy.t -> T.t
 end = struct
   include Ephemeron.Kn.Make(Tag)
 
-  let table : T.t t = create 0
+  let table = create 0
 
   let cache key thunk =
     begin try find table key with
