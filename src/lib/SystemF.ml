@@ -14,19 +14,19 @@ end
 module Internable (T : Caml.Hashtbl.HashedType) () : sig
   val intern : T.t -> T.t Node.t
 end = struct
-  module M = Ephemeron.K1.Make(Tag)
+  include Ephemeron.K1.Make(Tag)
 
   let counter = ref 0
   let tag () = incr counter; !counter
-  let cache = M.create 0
+  let cache = create 0
 
   let intern obj =
     let key = T.hash obj in
-    begin try M.find cache key with
+    begin try find cache key with
       | Not_found ->
         let tag = tag () in
         let res = Node.{ obj; tag } in
-        M.add cache key res;
+        add cache key res;
         res
     end
 end
@@ -34,17 +34,17 @@ end
 (* FIXME: Determine how much overhead using Lazy.t entails. We could do this
    more efficiently with a custom ppx instead of creating thunks. *)
 module Memoizer (T : sig type t end) : sig
-  val cache : int Array.t -> T.t Lazy.t -> T.t
+  val memoize : keys:int Array.t -> thunk:T.t Lazy.t -> T.t
 end = struct
   include Ephemeron.Kn.Make(Tag)
 
-  let table = create 0
+  let cache = create 0
 
-  let cache key thunk =
-    begin try find table key with
+  let memoize ~keys ~thunk =
+    begin try find cache keys with
       | Not_found ->
         let res = Lazy.force thunk in
-        add table key res;
+        add cache keys res;
         res
     end
 end
@@ -135,7 +135,7 @@ end = struct
     let module M = Memoizer(struct type t = Type.t Node.t option end) in
     let open Option.Let_syntax in
     let rec go ctx typ =
-      M.cache [| ctx.Node.tag; typ.Node.tag |] begin lazy
+      M.memoize [| ctx.Node.tag; typ.Node.tag |] begin lazy
         begin match typ.Node.obj with
           | Type.Unit ->
             return typ
@@ -184,7 +184,7 @@ end = struct
         end in
       go in
     fun ctx var ->
-      M.cache [| ctx.Node.tag; var |] begin lazy
+      M.memoize [| ctx.Node.tag; var |] begin lazy
         begin go var ctx var end
       end
 
@@ -218,7 +218,7 @@ end = struct
             go ctx @@ idx - 1
         end in
       fun ctx idx ->
-        M.cache [| ctx.Node.tag; idx |] begin lazy
+        M.memoize [| ctx.Node.tag; idx |] begin lazy
           begin go ctx idx end
         end
   end
@@ -253,7 +253,7 @@ end = struct
             go ctx @@ idx - 1
         end in
       fun ctx idx ->
-        M.cache [| ctx.Node.tag; idx |] begin lazy
+        M.memoize [| ctx.Node.tag; idx |] begin lazy
           begin go ctx idx end
         end
   end
@@ -321,7 +321,7 @@ end = struct
     (* has_metas: cache is checked on every recursive call *)
     let module M = Memoizer(struct type t = bool end) in
     let rec go typ =
-      M.cache [| typ.Node.tag |] begin lazy
+      M.memoize [| typ.Node.tag |] begin lazy
         begin match typ.Node.obj with
           | Unit ->
             false
@@ -365,7 +365,7 @@ end = struct
     let module M = Memoizer(struct type t = unit option end) in
     let open Option.Let_syntax in
     let rec go ctx typ =
-      M.cache [| ctx.Node.tag; typ.Node.tag |] begin lazy
+      M.memoize [| ctx.Node.tag; typ.Node.tag |] begin lazy
         begin match typ.Node.obj with
           | Type.Unit ->
             return ()
@@ -474,7 +474,7 @@ end = struct
     let module M = Memoizer(struct type t = Check.t option end) in
     let open Option.Let_syntax in
     let rec go ctx trm typ pri =
-      M.cache [| ctx.Node.tag; trm.Node.tag; typ.Node.tag; Principal.hash pri |] begin lazy
+      M.memoize [| ctx.Node.tag; trm.Node.tag; typ.Node.tag; Principal.hash pri |] begin lazy
         begin match trm.Node.obj, typ.Node.obj, pri with
           | Term.Unit, Type.Unit, _pri ->
             return Check.{ ctx }
@@ -489,7 +489,7 @@ end = struct
     let open Option.Let_syntax in
     let module M = Memoizer(struct type t = Infer.t option end) in
     let rec go ctx trm =
-      M.cache [| ctx.Node.tag; trm.Node.tag |] begin lazy
+      M.memoize [| ctx.Node.tag; trm.Node.tag |] begin lazy
         begin match trm.Node.obj with
           | Term.Unit ->
             (* FIXME: not in paper *)
