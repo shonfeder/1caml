@@ -100,7 +100,7 @@ module rec Context : sig
 
   module Type : sig
     module Lookup : sig
-      type t = { srt : Sort.t }
+      type t = { srt : Sort.t } [@@unboxed]
       [@@deriving (compare, hash, sexp, show)]
     end
     val lookup : t Node.t -> Type.Var.t -> Sort.t option
@@ -226,7 +226,7 @@ end = struct
 
   module Type = struct
     module Lookup = struct
-      type t = { srt : Sort.t }
+      type t = { srt : Sort.t } [@@unboxed]
       [@@deriving (compare, hash, sexp, show)]
     end
 
@@ -420,7 +420,7 @@ and Term : sig
   val ann : trm:t Node.t -> typ:Type.t Node.t -> t Node.t
 
   module Check : sig
-    type t = { ctx : Context.t Node.t }
+    type t = { ctx : Context.t Node.t } [@@unboxed]
     [@@deriving (compare, hash, sexp, show)]
   end
 
@@ -461,7 +461,7 @@ end = struct
   include T
 
   module Check = struct
-    type t = { ctx : Context.t Node.t }
+    type t = { ctx : Context.t Node.t } [@@unboxed]
     [@@deriving (compare, hash, sexp, show)]
   end
 
