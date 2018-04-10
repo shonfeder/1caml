@@ -152,6 +152,12 @@ end = struct
             return @@ Type.exi ~srt ~typ
           | Type.Meta { var } ->
             resolve ctx var
+          | Type.Guard { prop; typ } ->
+            let%bind typ = go ctx typ in
+            return @@ Type.guard ~prop ~typ
+          | Type.Assert { prop; typ } ->
+            let%bind typ = go ctx typ in
+            return @@ Type.guard ~prop ~typ
         end
       end in
     go
@@ -272,6 +278,8 @@ and Type : sig
     | All of { srt : Sort.t; typ : t Node.t }
     | Exi of { srt : Sort.t; typ : t Node.t }
     | Meta of { var : Var.t }
+    | Guard of { prop : Prop.t; typ : t Node.t }
+    | Assert of { prop : Prop.t; typ : t Node.t }
   [@@deriving (compare, hash, sexp, show)]
 
   val unit : unit -> t Node.t
@@ -280,6 +288,8 @@ and Type : sig
   val all : srt:Sort.t -> typ:t Node.t -> t Node.t
   val exi : srt:Sort.t -> typ:t Node.t -> t Node.t
   val meta : var:Var.t -> t Node.t
+  val guard : prop:Prop.t -> typ:t Node.t -> t Node.t
+  val assert_ : prop:Prop.t -> typ: t Node.t -> t Node.t
 
   val has_metas : t Node.t -> bool
   val polarity : t Node.t -> Polarity.t
@@ -300,6 +310,8 @@ end = struct
       | All of { srt : Sort.t; typ : t Node.t }
       | Exi of { srt : Sort.t; typ : t Node.t }
       | Meta of { var : Var.t }
+      | Guard of { prop : Prop.t; typ : t Node.t }
+      | Assert of { prop : Prop.t; typ : t Node.t }
     [@@deriving (compare, hash, sexp, show)]
     let equal = [%compare.equal: t]
   end
@@ -312,6 +324,8 @@ end = struct
     let all ~srt ~typ = intern @@ T.All { srt; typ }
     let exi ~srt ~typ = intern @@ T.Exi { srt; typ }
     let meta ~var = intern @@ T.Meta { var }
+    let guard ~prop ~typ = intern @@ T.Guard { prop; typ }
+    let assert_ ~prop ~typ = intern @@ T.Assert { prop; typ }
   end
 
   include Interner
@@ -335,6 +349,10 @@ end = struct
             go typ
           | Meta _var ->
             true
+          | Guard { typ } ->
+            go typ
+          | Assert { typ } ->
+            go typ
         end
       end in
     go
@@ -384,6 +402,10 @@ end = struct
             go ctx typ
           | Type.Meta _var ->
             failwith @@ [%derive.show: _] (ctx, typ)
+          | Type.Guard { typ } ->
+            go ctx typ
+          | Type.Assert { typ } ->
+            go ctx typ
         end
       end in
     go
@@ -514,4 +536,19 @@ end = struct
         end
       end in
     go
+end
+
+and Prop : sig
+  type t = private
+    | Equal of { lhs : Term.t Node.t; rhs : Term.t Node.t }
+  [@@deriving (compare, hash, sexp, show)]
+end = struct
+  module T = struct
+    type t =
+      | Equal of { lhs : Term.t Node.t; rhs : Term.t Node.t }
+    [@@deriving (compare, hash, sexp, show)]
+    let equal = [%compare.equal: t]
+  end
+
+  include T
 end
